@@ -11,8 +11,7 @@ class Marc4R::MarcStreamReader
     until @io.eof? do
       leader = @io.read(24)
       record = Marc4R::Record.new(leader)
-      record_body = @io.read(record.leader.record_length - 24)
-      load_record(record, record_body)
+      load_record(record, @io)
       yield record
     end
   end
@@ -36,19 +35,20 @@ class Marc4R::MarcStreamReader
     starts = []
     offset = 0
     size.times do
-      tags << content.slice(offset,3)
-      lengths << content.slice(offset+3,4).to_i
+      tags << content.read(3)
+      lengths << content.read(4).to_i
+      starts << content.read(5).to_i
       offset += 12
     end
 
-    unless content[offset] == Marc4R::Terminators::FIELD_TERMINATOR
+    unless content.read(1) == Marc4R::Terminators::FIELD_TERMINATOR
       raise Marc4R::MarcException.new("expected field terminator at end of directory")
     else
       offset += 1
     end
 
     (0...size).each do |i|
-      field_content = content.slice(offset,lengths[i])
+      field_content = content.read(lengths[i])
       offset += lengths[i]
       unless field_content[-1] == Marc4R::Terminators::FIELD_TERMINATOR
         raise Marc4R::MarcException.new("expected field terminator at end of field #{field_content}")
@@ -60,8 +60,13 @@ class Marc4R::MarcStreamReader
         record.data_fields << data_field(tags[i],field_content[0...-1])
       end
     end
-    unless content[offset] == Marc4R::Terminators::RECORD_TERMINATOR
+    unless content.read(1) == Marc4R::Terminators::RECORD_TERMINATOR
       raise Marc4R::MarcException.new("expected record terminator")
+    else
+      offset += 1
+    end
+    unless offset.eql? (record.leader.record_length - 24)
+      raise "unexpected bytes read before record terminator #{offset+24} #{record.leader.record_length}"
     end
   end
   def data_field(tag, field_content)
